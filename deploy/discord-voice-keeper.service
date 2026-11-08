@@ -9,11 +9,13 @@ Type=simple
 User=ubuntu
 WorkingDirectory=/opt/discord-voice-keeper/current
 Environment=NODE_ENV=production
+Environment=DATA_DIR=/opt/discord-voice-keeper/data
 ExecStart=/usr/bin/node /opt/discord-voice-keeper/current/src/index.js
 Restart=always
 RestartSec=10
 NoNewPrivileges=true
 ProtectSystem=strict
+ReadWritePaths=/opt/discord-voice-keeper/data
 ProtectHome=true
 PrivateTmp=true
 ProtectKernelTunables=true

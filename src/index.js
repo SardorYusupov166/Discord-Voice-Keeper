@@ -1,135 +1,46 @@
 import "dotenv/config";
-import { Client, GatewayIntentBits, ChannelType } from "discord.js";
-import { joinVoiceChannel, getVoiceConnection, entersState, VoiceConnectionStatus } from "@discordjs/voice";
+import { Client, GatewayIntentBits } from "discord.js";
+import { commands, handleInteraction } from "./commands.js";
+import { VoiceKeeper } from "./keeper.js";
+import { migrateLegacyConfig } from "./storage.js";
 
-const { DISCORD_TOKEN, GUILD_ID, VOICE_CHANNEL_ID } = process.env;
-if (!DISCORD_TOKEN || !/^\d{17,20}$/.test(GUILD_ID ?? "") || !/^\d{17,20}$/.test(VOICE_CHANNEL_ID ?? "")) {
-  console.error("CONFIG_ERROR: Set DISCORD_TOKEN, GUILD_ID and VOICE_CHANNEL_ID in .env (IDs must be Discord snowflakes)");
+if (!process.env.DISCORD_TOKEN) {
+  console.error("CONFIG_ERROR: Set DISCORD_TOKEN in .env");
   process.exit(1);
 }
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
-let timer;
-let checking = false;
+const log = (event, details = "") => console.log(`${new Date().toISOString()} ${event} ${details}`.trim());
+const keeper = new VoiceKeeper(client, { log });
 let stopping = false;
-let retryMs = 5_000;
-let connection;
-const WATCHDOG_MS = 60_000;
-const READY_TIMEOUT_MS = 25_000;
+let registrationTimer;
 
-function log(event, details = "") {
-  console.log(`${new Date().toISOString()} ${event}${details ? ` ${details}` : ""}`);
-}
-
-function schedule(delay) {
-  if (stopping) return;
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => {
-    timer = undefined;
-    void ensureConnection();
-  }, delay);
-}
-
-function disposeConnection() {
-  const existing = getVoiceConnection(GUILD_ID);
-  if (existing && existing.state.status !== VoiceConnectionStatus.Destroyed) existing.destroy();
-  connection = undefined;
-}
-
-function attachConnection(next) {
-  if (connection === next) return;
-  connection = next;
-  next.on("error", (error) => {
-    console.error("VOICE_ERROR:", error);
-    schedule(2_000);
-  });
-  next.on("stateChange", (oldState, newState) => {
-    log("VOICE_STATE", `${oldState.status} -> ${newState.status}`);
-    if (newState.status === VoiceConnectionStatus.Ready) {
-      retryMs = 5_000;
-      log("VOICE_READY", `guild=${GUILD_ID} channel=${VOICE_CHANNEL_ID}`);
-      schedule(WATCHDOG_MS);
-    } else if (newState.status === VoiceConnectionStatus.Disconnected || newState.status === VoiceConnectionStatus.Destroyed) {
-      schedule(2_000);
-    }
-  });
-}
-
-async function ensureConnection() {
-  if (checking || stopping) return;
-  if (!client.isReady()) {
-    log("GATEWAY_WAIT", "Discord gateway is not ready");
-    schedule(retryMs);
-    return;
-  }
-  checking = true;
+async function registerCommands() {
+  if (stopping || !client.isReady()) return;
   try {
-    const guild = await client.guilds.fetch(GUILD_ID);
-    const channel = await guild.channels.fetch(VOICE_CHANNEL_ID);
-    if (!channel || channel.guildId !== GUILD_ID || channel.type !== ChannelType.GuildVoice) {
-      throw new Error("Configured channel must be a standard voice channel in the configured guild");
-    }
-
-    const voiceState = guild.voiceStates.cache.get(client.user.id);
-    const stateMismatch = voiceState && (voiceState.channelId !== VOICE_CHANNEL_ID || !voiceState.selfMute || !voiceState.selfDeaf);
-    let next = getVoiceConnection(GUILD_ID);
-    if (next && (next.state.status === VoiceConnectionStatus.Destroyed || next.joinConfig.channelId !== VOICE_CHANNEL_ID)) {
-      disposeConnection();
-      next = undefined;
-    }
-    if (next?.state.status === VoiceConnectionStatus.Ready && !stateMismatch) {
-      schedule(WATCHDOG_MS);
-      return;
-    }
-    if (next && (next.state.status === VoiceConnectionStatus.Disconnected || stateMismatch)) {
-      log("VOICE_REJOIN", `status=${next.state.status} actualChannel=${voiceState?.channelId ?? "unknown"}`);
-      if (!next.rejoin({ channelId: VOICE_CHANNEL_ID, selfDeaf: true, selfMute: true })) {
-        disposeConnection();
-        next = undefined;
-      }
-    }
-    if (!next) {
-      log("VOICE_JOIN", `guild=${GUILD_ID} channel=${VOICE_CHANNEL_ID}`);
-      next = joinVoiceChannel({
-        channelId: VOICE_CHANNEL_ID,
-        guildId: GUILD_ID,
-        adapterCreator: guild.voiceAdapterCreator,
-        selfDeaf: true,
-        selfMute: true,
-      });
-    }
-    attachConnection(next);
-    await entersState(next, VoiceConnectionStatus.Ready, READY_TIMEOUT_MS);
-    retryMs = 5_000;
-    schedule(WATCHDOG_MS);
+    await client.application.commands.set(commands);
+    log("COMMANDS_REGISTERED", `count=${commands.length}`);
   } catch (error) {
-    console.error("VOICE_CONNECT_FAILED:", error);
-    // Signalling and connecting can remain stuck indefinitely after a timeout.
-    disposeConnection();
-    const delay = retryMs;
-    retryMs = Math.min(Math.round(retryMs * 1.5), 60_000);
-    log("VOICE_RETRY", `in=${delay}ms`);
-    schedule(delay);
-  } finally {
-    checking = false;
+    console.error("COMMANDS_REGISTER_FAILED:", error);
+    registrationTimer = setTimeout(() => { void registerCommands(); }, 60_000);
   }
 }
 
-client.on("ready", () => {
+client.once("ready", () => {
   log("GATEWAY_READY", `user=${client.user.tag}`);
-  schedule(0);
+  if (migrateLegacyConfig(process.env.GUILD_ID, process.env.VOICE_CHANNEL_ID)) log("LEGACY_CONFIG_MIGRATED");
+  keeper.start();
+  void registerCommands();
 });
 client.on("shardResume", () => {
   log("GATEWAY_RESUMED");
-  schedule(0);
+  keeper.onGatewayResume();
+  void registerCommands();
 });
 client.on("shardDisconnect", (event) => log("GATEWAY_DISCONNECTED", `code=${event.code}`));
-client.on("voiceStateUpdate", (_oldState, newState) => {
-  if (newState.id !== client.user?.id || newState.guild.id !== GUILD_ID) return;
-  if (newState.channelId !== VOICE_CHANNEL_ID || !newState.selfMute || !newState.selfDeaf) {
-    log("VOICE_STATE_MISMATCH", `channel=${newState.channelId ?? "none"} mute=${newState.selfMute} deaf=${newState.selfDeaf}`);
-    schedule(2_000);
-  }
+client.on("voiceStateUpdate", (_oldState, newState) => keeper.onVoiceState(newState));
+client.on("interactionCreate", (interaction) => {
+  void handleInteraction(interaction, keeper).catch((error) => console.error("INTERACTION_ERROR:", error));
 });
 client.on("error", (error) => console.error("GATEWAY_ERROR:", error));
 client.on("warn", (message) => log("GATEWAY_WARN", message));
@@ -137,8 +48,8 @@ client.on("warn", (message) => log("GATEWAY_WARN", message));
 function shutdown() {
   if (stopping) return;
   stopping = true;
-  if (timer) clearTimeout(timer);
-  disposeConnection();
+  if (registrationTimer) clearTimeout(registrationTimer);
+  keeper.stop();
   client.destroy();
   log("SHUTDOWN");
 }
@@ -154,7 +65,7 @@ process.on("uncaughtException", (error) => {
   process.exitCode = 1;
   shutdown();
 });
-client.login(DISCORD_TOKEN).catch((error) => {
+client.login(process.env.DISCORD_TOKEN).catch((error) => {
   console.error("LOGIN_FAILED:", error);
   process.exitCode = 1;
   shutdown();

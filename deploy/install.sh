@@ -21,6 +21,8 @@ fi
 command -v npm >/dev/null || { echo 'npm is missing after Node.js installation' >&2; exit 1; }
 
 install -d -m 755 "$BASE" "$BASE/releases"
+install -d -m 700 -o ubuntu -g ubuntu "$BASE/data"
+install -d -m 700 -o root -g root "$BASE/backups"
 if [[ ! -d $SOURCE/.git ]]; then
   git clone --depth 1 --branch main "$REPO" "$SOURCE"
 elif [[ $(git -C "$SOURCE" remote get-url origin) != "$REPO" ]]; then
