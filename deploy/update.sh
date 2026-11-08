@@ -24,6 +24,7 @@ if [[ ! -d $release ]]; then
   ln -s "$BASE/.env" "$stage/.env"
   chown -R root:root "$stage"
   chmod -R go-w "$stage"
+  chmod 755 "$stage"
   mv -- "$stage" "$release"
   trap - EXIT
 fi
