@@ -27,6 +27,8 @@ elif [[ $(git -C "$SOURCE" remote get-url origin) != "$REPO" ]]; then
   echo "Unexpected Git origin in $SOURCE" >&2
   exit 1
 fi
+git -C "$SOURCE" fetch --depth 1 origin main
+git -C "$SOURCE" reset --hard FETCH_HEAD
 
 if [[ ! -f $BASE/.env ]]; then
   install -m 600 -o ubuntu -g ubuntu /dev/null "$BASE/.env"
