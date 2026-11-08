@@ -33,6 +33,8 @@ previous=$(readlink -f "$BASE/current" 2>/dev/null || true)
 rm -f -- "$BASE/.current-next"
 ln -s "$release" "$BASE/.current-next"
 mv -Tf "$BASE/.current-next" "$BASE/current"
+install -m 644 "$release/deploy/discord-voice-keeper.service" /etc/systemd/system/discord-voice-keeper.service
+systemctl daemon-reload
 
 configured=true
 for name in DISCORD_TOKEN GUILD_ID VOICE_CHANNEL_ID; do
@@ -57,6 +59,8 @@ echo "New release did not report VOICE_READY within 45 seconds" >&2
 if [[ -n $previous && -d $previous ]]; then
   ln -s "$previous" "$BASE/.current-next"
   mv -Tf "$BASE/.current-next" "$BASE/current"
+  install -m 644 "$previous/deploy/discord-voice-keeper.service" /etc/systemd/system/discord-voice-keeper.service
+  systemctl daemon-reload
   systemctl restart "$UNIT"
   echo "Rolled back to $previous" >&2
 else
