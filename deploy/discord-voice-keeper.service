@@ -2,20 +2,26 @@
 Description=Discord Voice Keeper
 Wants=network-online.target
 After=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/opt/discord-voice-keeper
+WorkingDirectory=/opt/discord-voice-keeper/current
 Environment=NODE_ENV=production
-ExecStart=/usr/bin/node /opt/discord-voice-keeper/src/index.js
+ExecStart=/usr/bin/node /opt/discord-voice-keeper/current/src/index.js
 Restart=always
 RestartSec=10
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadOnlyPaths=/opt/discord-voice-keeper
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+UMask=0077
 StandardOutput=journal
 StandardError=journal
 

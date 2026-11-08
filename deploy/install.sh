@@ -1,22 +1,45 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${EUID}" -ne 0 ]]; then echo "Run with sudo"; exit 1; fi
-command -v node >/dev/null || { echo "Install Node.js 22 first"; exit 1; }
-command -v npm >/dev/null || { echo "Install npm first"; exit 1; }
-id ubuntu >/dev/null || { echo "Missing ubuntu user"; exit 1; }
-DIR=/opt/discord-voice-keeper
-install -d -m 755 "$DIR"
-cp package.json "$DIR/"
-cp -r src "$DIR/"
-cd "$DIR"
-npm install --omit=dev --no-audit --no-fund
-if [[ ! -f .env ]]; then
-  install -m 600 -o ubuntu -g ubuntu /dev/null .env
-  echo "Created $DIR/.env; configure DISCORD_TOKEN, GUILD_ID, VOICE_CHANNEL_ID before starting"
+
+[[ $EUID -eq 0 ]] || { echo 'Run with sudo' >&2; exit 1; }
+id ubuntu >/dev/null || { echo 'The ubuntu user is required' >&2; exit 1; }
+
+BASE=/opt/discord-voice-keeper
+SOURCE=$BASE/source
+REPO=https://github.com/SardorYusupov166/Discord-Voice-Keeper.git
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y ca-certificates curl git
+
+if ! command -v node >/dev/null || ! node -e 'const v=process.versions.node.split(".").map(Number); process.exit(v[0]===22 && v[1]>=13 ? 0 : 1)'; then
+  setup=$(mktemp)
+  trap 'rm -f "$setup"' EXIT
+  curl -fsSL https://deb.nodesource.com/setup_22.x -o "$setup"
+  bash "$setup"
+  apt-get install -y nodejs
 fi
-chown -R ubuntu:ubuntu "$DIR"
-chmod 600 "$DIR/.env"
-install -m 644 "$OLDPWD/deploy/discord-voice-keeper.service" /etc/systemd/system/
+command -v npm >/dev/null || { echo 'npm is missing after Node.js installation' >&2; exit 1; }
+
+install -d -m 755 "$BASE" "$BASE/releases"
+if [[ ! -d $SOURCE/.git ]]; then
+  git clone --depth 1 --branch main "$REPO" "$SOURCE"
+elif [[ $(git -C "$SOURCE" remote get-url origin) != "$REPO" ]]; then
+  echo "Unexpected Git origin in $SOURCE" >&2
+  exit 1
+fi
+
+if [[ ! -f $BASE/.env ]]; then
+  install -m 600 -o ubuntu -g ubuntu /dev/null "$BASE/.env"
+  cat >"$BASE/.env" <<'EOF'
+DISCORD_TOKEN=
+GUILD_ID=
+VOICE_CHANNEL_ID=
+EOF
+fi
+chown ubuntu:ubuntu "$BASE/.env"
+chmod 600 "$BASE/.env"
+
+install -m 644 "$SOURCE/deploy/discord-voice-keeper.service" /etc/systemd/system/discord-voice-keeper.service
 systemctl daemon-reload
 systemctl enable discord-voice-keeper.service
-echo "Edit $DIR/.env securely, then run sudo systemctl restart discord-voice-keeper"
+bash "$SOURCE/deploy/update.sh"

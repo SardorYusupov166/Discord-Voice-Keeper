@@ -1,46 +1,61 @@
 # Discord Voice Keeper
 
-A minimal Discord bot that keeps a voice channel occupied without playing audio. Node.js 22+, discord.js and @discordjs/voice.
+Бот постоянно находится в одном голосовом канале без передачи или воспроизведения звука. При подключении используются `selfMute: true` и `selfDeaf: true`. После потери связи бот переподключается, а после перезагрузки Ubuntu его запускает systemd.
 
-## Discord setup
-1. Create an application and bot in [Discord Developer Portal](https://discord.com/developers/applications).
-2. Invite with **View Channel**, **Connect** permissions. Enable **Guilds** and **Guild Voice States** gateway intents (non-privileged).
-3. In Discord settings, enable Developer Mode and copy server ID and voice channel ID.
-4. Copy `.env.example` to `.env` and fill `DISCORD_TOKEN`, `GUILD_ID`, `VOICE_CHANNEL_ID`. Never commit `.env`.
+## Подготовка Discord
 
-## Local run
+1. Создайте бота в [Discord Developer Portal](https://discord.com/developers/applications) и пригласите его на сервер с правами **View Channel** и **Connect** для выбранного голосового канала. Для переподключения канал не должен быть заполнен или иметь ограничение, блокирующее бота.
+2. Включите Developer Mode в Discord и скопируйте ID сервера и обычного голосового канала. Stage channels не поддерживаются.
+3. Сохраните токен бота. Не вставляйте его в GitHub, чат или команды, которые попадут в историю оболочки.
 
-```bash
-npm install
-npm start
+Привилегированные gateway intents не требуются.
+
+## Установка на Oracle Cloud Ubuntu 22.04
+
+На Windows в PowerShell подключитесь с вашим **локальным** приватным ключом (замените путь):
+
+```powershell
+ssh -i "C:\path\to\your\private-key.key" ubuntu@132.145.102.65
 ```
 
-## Oracle Ubuntu 22.04 (1 GB RAM)
-
-SSH from your own machine using your private key (never upload it to GitHub).
+На сервере выполните:
 
 ```bash
-sudo apt update
-sudo apt install -y git curl ca-certificates
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-node -v
+sudo apt-get update && sudo apt-get install -y git
 git clone https://github.com/SardorYusupov166/Discord-Voice-Keeper.git
 cd Discord-Voice-Keeper
 sudo bash deploy/install.sh
 sudo nano /opt/discord-voice-keeper/.env
-sudo systemctl restart discord-voice-keeper
-sudo systemctl status discord-voice-keeper --no-pager
-sudo journalctl -u discord-voice-keeper -n 100 --no-pager
+sudo systemctl start discord-voice-keeper.service
+sudo journalctl -u discord-voice-keeper.service -n 50 --no-pager
 ```
 
-To update: `git pull` in the clone, then `sudo bash deploy/install.sh` and `sudo systemctl restart discord-voice-keeper`.
+В `.env` заполните ровно три значения:
 
-Uses outbound Discord connections only; no additional incoming ports required for bot traffic. A public IP and valid internet gateway route may be needed for SSH and outbound network on Oracle Cloud. The process is kept alive by systemd, subject to Oracle infrastructure availability.
+```dotenv
+DISCORD_TOKEN=your_bot_token
+GUILD_ID=123456789012345678
+VOICE_CHANNEL_ID=123456789012345678
+```
 
-**Security:** do not send tokens or SSH private keys in chat. `.env` stays on server. If running on a publicly visible cloud instance, restrict SSH inbound to your IP if practical.
+Файл `.env` находится только на сервере, принадлежит пользователю `ubuntu` и доступен только ему и root. Если токен содержит специальные символы для dotenv, заключите значение в двойные кавычки. После успешного запуска в журнале появится `VOICE_READY`. При ошибке подключения бот пишет `VOICE_CONNECT_FAILED` и повторяет попытки. Дополнительные входящие порты для бота не нужны.
 
-## Troubleshooting
-- `sudo journalctl -u discord-voice-keeper -f` for live logs.
-- Verify bot is invited and has Connect/View Channel permissions, and the IDs are correct.
-- For voice libraries that require optional crypto dependencies, install the dependency recommended by your installed `@discordjs/voice` version.
+## Обновление
+
+```bash
+sudo bash /opt/discord-voice-keeper/current/deploy/update.sh
+```
+
+Скрипт берёт `main` из этого же репозитория, устанавливает зависимости из `package-lock.json` в отдельный каталог, переключает символическую ссылку и перезапускает службу. Если `VOICE_READY` не появился за 45 секунд, скрипт возвращает предыдущую версию. `.env` остаётся на месте. Скрипт можно запускать повторно.
+
+## Проверка и диагностика
+
+```bash
+systemctl status discord-voice-keeper.service --no-pager
+sudo journalctl -u discord-voice-keeper.service -f
+node --version
+```
+
+Требуется Node.js 22.13 или новее в ветке 22; установщик ставит его через NodeSource при необходимости. Установка включает автозапуск systemd. Соединения с Discord исходящие. Доступность бота также зависит от работы Discord, сети и самой виртуальной машины Oracle.
+
+Локальная проверка после `npm ci`: `npm run check`. Для реальной проверки голосового подключения нужны действительные токен, ID и приглашённый в канал бот.
