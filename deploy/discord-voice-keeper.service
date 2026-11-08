@@ -1,0 +1,23 @@
+[Unit]
+Description=Discord Voice Keeper
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/discord-voice-keeper
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/discord-voice-keeper/src/index.js
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/opt/discord-voice-keeper
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
